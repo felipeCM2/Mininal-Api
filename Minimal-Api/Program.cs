@@ -1,32 +1,62 @@
+using Minimal_Api;
+using Minimal_Api.Models;
+using Minimal_Api.Repositories;
+using Minimal_Api.Services;
+using System.Security.Claims;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+builder.Services.AddJwtConfiguration();
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Admin", policy => policy.RequireRole("manager"));
+    options.AddPolicy("Employee", policy => policy.RequireRole("employee"));
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+app.UseAuthentication();
+app.UseAuthorization();
 
-var summaries = new[]
+app.MapPost("/login", (User model) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var user = UserRepository.Get(model.Username, model.Password);
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-       new WeatherForecast
-       (
-           DateTime.Now.AddDays(index),
-           Random.Shared.Next(-20, 55),
-           summaries[Random.Shared.Next(summaries.Length)]
-       ))
-        .ToArray();
-    return forecast;
+    if (user == null)
+    {
+        return Results.NotFound(new { message = "Invalid Username or password" });
+    }
+
+    var token = TokenService.GenerateToken(user);
+
+    user.Password = "";
+
+    return Results.Ok(new
+    {
+        user,
+        token
+    });
 });
 
-app.Run();
-
-internal record WeatherForecast(DateTime Date, int TemperatureC, string? Summary)
+app.MapGet("/anonymous", () =>
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+    Results.Ok(new {message = "anonymous route" });
+});
+
+app.MapGet("/authenticated", (ClaimsPrincipal user) =>
+{
+    Results.Ok(new { message = $"Authenticated as {user.Identity.Name}" });
+}).RequireAuthorization();
+
+app.MapGet("/employee", (ClaimsPrincipal user) =>
+{
+    Results.Ok(new { message = $"Authenticated as {user.Identity.Name}" });
+}).RequireAuthorization("Employee");
+
+app.MapGet("/manager", (ClaimsPrincipal user) =>
+{
+    Results.Ok(new { message = $"Authenticated as {user.Identity.Name}" });
+}).RequireAuthorization("Admin");
+
+app.Run();
